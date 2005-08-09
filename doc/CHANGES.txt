@@ -24,7 +24,26 @@ Zope Changes
 
   after Zope 2.8.1 b1 
 
+    Features added
+
+      - Interface: Added Z3 -> Z2 bridge utilities.
+        This allows to migrate interfaces to Zope 3 style interfaces and
+        bridge them back to oldstyle interfaces for backwards compatibility.
+
     Bugs Fixed
+
+      - Enhance userid/username separation on ZMI screens:
+        manage_owner now displays the username instead of the userid and
+	local roles management functions (manage_{add,set,del}LocalRoles)
+	now lookup the userid if they get a username.
+
+      - Zope2.Startup.zopectl: fork before execv when running unit tests
+        (don't exit the shell, if run from there).
+
+      - TAL: MassageIDs are now handled the same way as in zope.tal.
+
+      - DocumentTemplate: ustr no longer mangles MassageIDs.
+        Custom string types are now returned unchanged.
 
       -  As developed in a long thread starting at
          http://mail.zope.org/pipermail/zope/2005-July/160433.html
