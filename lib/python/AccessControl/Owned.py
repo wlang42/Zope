@@ -56,6 +56,7 @@ class Owned(ExtensionClass.Base):
             return owner
 
         d={'path': '/'.join(owner[0]), 'id': owner[1],
+           'name': self.getOwner().getUserName(),
            'explicit': hasattr(self, '_owner'),
            'userCanChangeOwnershipType':
            getSecurityManager().checkPermission('Take ownership', self)

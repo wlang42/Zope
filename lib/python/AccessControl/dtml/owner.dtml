@@ -11,7 +11,7 @@ it determines what roles they have when they are executed. See the
 <p>
 <strong>
 This object is <dtml-if owner_info><dtml-with 
-owner_info mapping>owned by &dtml-id; (&dtml-path;).</dtml-with
+owner_info mapping>owned by &dtml-name; (&dtml-path;).</dtml-with
 ><dtml-else>unowned.</dtml-if>
 </strong>
 </p>

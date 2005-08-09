@@ -15,6 +15,9 @@
 $Id$
 """
 from cgi import escape
+from urllib import quote_plus, unquote_plus
+import re
+import sets
 
 from Globals import DTMLFile, MessageDialog, Dictionary
 from Acquisition import Implicit, Acquired, aq_get
@@ -23,8 +26,27 @@ from App.Common import aq_base
 
 from Permission import Permission
 
-
 DEFAULTMAXLISTUSERS=250
+
+_missing_re = re.compile("^_MISSING_(.*)$")
+_missing_pattern = "_MISSING_%s"
+
+def _unwrapMissingUserId(username):
+    """_unwrapMissingUserId(username) -> unwrapped id or None
+
+    if username matches the 'wrapped missing userid' pattern,
+    returns the unwrapped userid. Returns None otherwise"""
+    m = _missing_re.match(username)
+    if m is not None:
+        return unquote_plus(m.group(1))
+    return None
+
+def _wrapMissingUserId(uid):
+    """_wrapMissingUserId(uid) -> fake-username
+
+    returns a userid wrapped in a recognizable pattern, quoted for safe
+    transport thru a URL query string"""
+    return _missing_pattern % quote_plus(uid)
 
 def _isBeingUsedAsAMethod(self):
     return aq_get(self, '_isBeingUsedAsAMethod_', 0)
@@ -305,12 +327,12 @@ class RoleManager(ExtensionClass.Base, PermissionMapping.RoleManager):
 
     def get_local_roles(self):
         dict=self.__ac_local_roles__ or {}
-        keys=dict.keys()
-        keys.sort()
         info=[]
-        for key in keys:
-            value=tuple(dict[key])
-            info.append((key, value))
+        for key, value in dict.items():
+            roles=tuple(value)
+            username = self._fetchUserName(key)
+            info.append((username, roles))
+        info.sort() # sort by username
         return tuple(info)
 
     def users_with_local_role(self, role):
@@ -320,39 +342,71 @@ class RoleManager(ExtensionClass.Base, PermissionMapping.RoleManager):
                 got[user] = 1
         return got.keys()
 
-    def get_valid_userids(self):
+    def _acl_users_generator(self):
+        """ generator that returns all acl_users meaningful for this
+        RoleManager """
         item=self
-        dict={}
-        _notfound = []
-        while 1:
+        _notfound = object()
+        while item is not _notfound:
             aclu = getattr(aq_base(item), '__allow_groups__', _notfound)
             if aclu is not _notfound:
-                mlu = getattr(aclu, 'maxlistusers', _notfound)
-                if not isinstance(mlu, int): mlu = DEFAULTMAXLISTUSERS
-                if mlu < 0: raise OverflowError
-                un = getattr(aclu, 'user_names', _notfound)
-                if un is not _notfound:
-                    unl = un()
-                    # maxlistusers of 0 is list all
-                    if len(unl) > mlu and mlu != 0:
-                        raise OverflowError
-                    for name in un():
-                        dict[name]=1
+                yield aclu
             item = getattr(item, 'aq_parent', _notfound)
-            if item is _notfound:
-                break
-        keys=dict.keys()
-        keys.sort()
-        return tuple(keys)
 
-    def get_local_roles_for_userid(self, userid):
+    def get_valid_userids(self):
+        # XXX misnomer, should be called get_valid_usernames
+        _notfound = object()
+        usernames = sets.Set()
+        for aclu in self._acl_users_generator():
+            mlu = getattr(aclu, 'maxlistusers', _notfound)
+            if not isinstance(mlu, int): mlu = DEFAULTMAXLISTUSERS
+            if mlu < 0: raise OverflowError
+            un = getattr(aclu, 'user_names', _notfound)
+            if un is not _notfound:
+                unl = un()
+                # maxlistusers of 0 is list all
+                if len(unl) > mlu and mlu != 0:
+                    raise OverflowError
+                for name in un():
+                    usernames.add(name)
+        usernames = list(usernames)
+        usernames.sort()
+        return tuple(usernames)
+
+    def get_local_roles_for_userid(self, username):
+        # XXX misnomer, should be called get_local_roles_for_username
+        userid = self._fetchUserId(username)
         dict=self.__ac_local_roles__ or {}
         return tuple(dict.get(userid, []))
 
-    def manage_addLocalRoles(self, userid, roles, REQUEST=None):
+    def _fetchUserId(self, username):
+        muid = _unwrapMissingUserId(username)
+        if muid is not None:
+            return muid
+        for aclu in self._acl_users_generator():
+            user = aclu.getUser(username)
+            if user is not None:
+                return user.getId()
+            # backward compatibility, we must try the username as userid
+            # because of ObjectManager._setObject()
+            user = aclu.getUserById(username)
+            if user is not None:
+                return user.getId()
+        raise ValueError, 'No user named "%s" in relevant acl_users' % username
+
+    def _fetchUserName(self, userid):
+        for aclu in self._acl_users_generator():
+            user = aclu.getUserById(userid)
+            if user is not None:
+                return user.getUserName()
+        # UGLY BACKWARD COMPATIBILITY HACK
+        return _wrapMissingUserId(userid)
+
+    def manage_addLocalRoles(self, username, roles, REQUEST=None):
         """Set local roles for a user."""
         if not roles:
             raise ValueError, 'One or more roles must be given!'
+        userid = self._fetchUserId(username)
         dict=self.__ac_local_roles__
         if dict is None:
             self.__ac_local_roles__ = dict = {}
@@ -366,10 +420,11 @@ class RoleManager(ExtensionClass.Base, PermissionMapping.RoleManager):
             stat='Your changes have been saved.'
             return self.manage_listLocalRoles(self, REQUEST, stat=stat)
 
-    def manage_setLocalRoles(self, userid, roles, REQUEST=None):
+    def manage_setLocalRoles(self, username, roles, REQUEST=None):
         """Set local roles for a user."""
         if not roles:
             raise ValueError, 'One or more roles must be given!'
+        userid = self._fetchUserId(username)
         dict=self.__ac_local_roles__
         if dict is None:
             self.__ac_local_roles__ = dict = {}
@@ -379,12 +434,13 @@ class RoleManager(ExtensionClass.Base, PermissionMapping.RoleManager):
             stat='Your changes have been saved.'
             return self.manage_listLocalRoles(self, REQUEST, stat=stat)
 
-    def manage_delLocalRoles(self, userids, REQUEST=None):
+    def manage_delLocalRoles(self, usernames, REQUEST=None):
         """Remove all local roles for a user."""
         dict=self.__ac_local_roles__
         if dict is None:
             self.__ac_local_roles__ = dict = {}
-        for userid in userids:
+        for username in usernames:
+            userid = self._fetchUserId(username)
             if dict.has_key(userid):
                 del dict[userid]
         self._p_changed=True
