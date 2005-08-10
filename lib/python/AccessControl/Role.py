@@ -21,7 +21,7 @@ import sets
 
 import logging
 
-logger = getLogger("AccessControl.Roles")
+logger = logging.getLogger("AccessControl.Roles")
 
 from Globals import DTMLFile, MessageDialog, Dictionary
 from Acquisition import Implicit, Acquired, aq_get
@@ -398,7 +398,7 @@ class RoleManager(ExtensionClass.Base, PermissionMapping.RoleManager):
                 return user.getId()
         #raise ValueError, 'No user named "%s" in relevant acl_users' % username
         logger.error("couldn't find user for username %r "
-                     "in any acl_users protecting %s\n"
+                     "in any acl_users protecting %s.\n"
                      "returning %r as userid" %
                      (username, "/".join(self.getPhysicalPath()), username))
         return username
