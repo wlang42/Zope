@@ -246,8 +246,8 @@ class LocalRolesTests(BaseTestCase):
         self.assertEquals(self.app.get_local_roles_for_userid('user1'),
                           ('Owner',))
         self.uf.renameUser('user1', 'user2')
-        self.assertRaises(ValueError,
-                          self.app.get_local_roles_for_userid, 'user1')
+        self.assertEquals(self.app.get_local_roles_for_userid('user1'),
+                          ())
         self.assertEquals(self.app.get_local_roles_for_userid('user2'),
                           ('Owner',))
 
@@ -308,6 +308,14 @@ class LocalRolesTests(BaseTestCase):
         security = getSecurityManager()
         self.failIf(security.checkPermission('Add Folders', self.app),
                     'allowed user with old name')
+
+    def test_acl_users_generator(self):
+        self.app.manage_addFolder('aFolder')
+        self.app.aFolder.manage_addUserFolder()
+        ufpaths = ['/'.join(uf.getPhysicalPath())
+                   for uf in self.app.aFolder._acl_users_generator()]
+        self.assertEquals(ufpaths, ['/aFolder/acl_users',
+                                    '/acl_users'])
 
 class OwnershipTests(BaseTestCase):
 

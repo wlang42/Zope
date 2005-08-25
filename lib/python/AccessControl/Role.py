@@ -354,7 +354,7 @@ class RoleManager(ExtensionClass.Base, PermissionMapping.RoleManager):
         while item is not _notfound:
             aclu = getattr(aq_base(item), '__allow_groups__', _notfound)
             if aclu is not _notfound:
-                yield aclu
+                yield item.__allow_groups__
             item = getattr(item, 'aq_parent', _notfound)
 
     def get_valid_userids(self):
