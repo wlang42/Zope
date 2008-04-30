@@ -1,4 +1,5 @@
 import unittest
+from urllib import quote
 
 from AccessControl.Owned import EmergencyUserCannotOwn
 from AccessControl.SecurityManagement import newSecurityManager
@@ -64,6 +65,7 @@ from OFS.interfaces import IItem
 class ObjectManagerWithIItem(ObjectManager):
     """The event subscribers work on IItem."""
     implements(IItem)
+    def getId(self): return ''
 
 class ObjectManagerTests(PlacelessSetup, unittest.TestCase):
 
@@ -388,10 +390,10 @@ class ObjectManagerTests(PlacelessSetup, unittest.TestCase):
         om._setObject('111', si)
         si = SimpleItem('2')
         self.assertRaises(BadRequest, om._setObject, 123, si)
-        self.assertRaises(BadRequest, om._setObject, 'a\x01b', si)
-        self.assertRaises(BadRequest, om._setObject, 'a\\b', si)
-        self.assertRaises(BadRequest, om._setObject, 'a:b', si)
-        self.assertRaises(BadRequest, om._setObject, 'a;b', si)
+        id = 'a\x01b'; si._setId(id); om._setObject(id, si); self.assertEqual(getattr(om, id).absolute_url(1), quote(id))
+        id = 'a\\b'; si._setId(id); om._setObject(id, si); self.assertEqual(getattr(om, id).absolute_url(1), quote(id))
+        id = 'a:b'; si._setId(id); om._setObject(id, si); self.assertEqual(getattr(om, id).absolute_url(1), quote(id))
+        id = 'a;b'; si._setId(id); om._setObject(id, si); self.assertEqual(getattr(om, id).absolute_url(1), quote(id))
         self.assertRaises(BadRequest, om._setObject, '.', si)
         self.assertRaises(BadRequest, om._setObject, '..', si)
         self.assertRaises(BadRequest, om._setObject, '_foo', si)

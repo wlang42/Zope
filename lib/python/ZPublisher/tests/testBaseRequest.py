@@ -233,6 +233,13 @@ class TestBaseRequest(unittest.TestCase):
         r = self._makeOne(root)
         self.assertRaises(NotFound, r.traverse, 'folder/simpleFrozenSet')
 
+    def test_traverse_utf8_encoded(self):
+        R, _ = self._makeRootAndFolder()
+        id = '\xee'
+        o = R._setObject(id, DummyObjectBasic())
+        r = self._makeOne(R)
+        self.assertEqual(r.traverse(id.decode('iso-8859-1').encode('utf-8')), o)
+
     def test_hold_after_close(self):
         # Request should no longer accept holds after it has been closed
         root, folder = self._makeRootAndFolder()

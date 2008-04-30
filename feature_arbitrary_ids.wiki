@@ -1,0 +1,85 @@
+||<bgcolor="#b0c0f4" style="text-align: center;" |2>   ''' ZopeArbitraryIds''' || Ersteller: '' ["maurerd"]'' ||
+|| Erstellt am: [[Date(2008-04-09T11:23:36Z)]] ||
+||||<style="text-align: center;"> Support (almost) arbitrary ids. ||
+----
+
+= Table of Contents =
+[[TableOfContents]]
+
+= Introduction =
+Zope2 allows only a very restricted set of characters in
+`ObjectManager` ids -- a subset of the characters which can
+be used unescaped in urls. Neither non-ASCII characters are allowed
+nor some quite important ASCII characters.
+
+When Zope is used outside the english language domain and
+accessed via WebDAV, then the restriction to ASCII characters only
+is heavily felt by WebDAV users, as they are accustomed to use
+readable names (with
+non-ASCII characters) in their file systems.
+They cannot understand why such objects cannot
+be transfered into Zope (especially given the most unhelpful error
+messages of some WebDAV clients).
+
+The limited set of allowed ASCII characters leads to other problems:
+e.g. email addresses cannot be used as ids as `@` is disallowed.
+
+= Feature =
+Allow almost arbitrary characters in ids.
+
+A few restrictions remain:
+
+ * ids cannot start with a '_' because they would not be traversable
+
+ * ids cannot contain '/' because Zope code uses
+   `urllib.[un]quote` on complete urls (a bug, [un]quoting must
+   only happen on the individual pieces, never the complete object)
+   and `quote` by default interpretes `/` as safe (not to be quoted).
+   Allowing '/' would risk too many breakages.
+
+Allowing non-ASCII characters in ids poses a risk, as
+the uri standard (RFC 2396) does not allow to specify the
+encoding used in urls. There is only HTML 4 which recommends
+that url components are first encoded as utf-8 and then url escaped
+as necessary. But this recommendation seems not to be widely used.
+However, when urls are constructed in a client (rather than directly
+fetched from an HTML source or given by a user) e.g. in Java or !JavaScript,
+then it is not unlikely that the recommendation is followed (as
+these systems work internally with unicode and need to use some
+encoding for url construction). I also have seen a client
+(the MS WebDAV client) to interpret ("binary") urls in some
+encoding and then recode them with utf-8.
+
+I see two options:
+
+ * Zope follows the HTML recommendation (and uses utf-8 in its generated urls).
+
+   This implies that either ids need to be unicode or their encoding
+   known (i.e. specifiable).
+
+ * Zope does not follow the HTML recommendation and uses
+   "binary" ids (with some unknown encoding) but uses some heuristics
+   to handle HTML 4 compatibly generated urls.
+
+As I am mainly concerned with WebDAV access and the WebDAV clients
+I have seen so far use the binary id interpretation, I favor the
+second option.
+   
+
+[[BR]]
+[[BR]]
+[[BR]]
+[[BR]]
+[[BR]]
+[[BR]]
+[[BR]]
+[[BR]]
+
+------
+[wiki:/Diskussion Diskussionsseite][[BR]]
+[[AttachTable]]
+----
+
+[[BR]][[BR]]
+
+

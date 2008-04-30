@@ -14,6 +14,7 @@
 
 $Id$
 """
+import sys
 from urllib import quote as urllib_quote
 import xmlrpc
 from zExceptions import Forbidden, Unauthorized, NotFound
@@ -343,6 +344,9 @@ class BaseRequest:
 
         The REQUEST must already have a PARENTS item with at least one
         object in it.  This is typically the root object.
+
+        Note: *path* is already url unquoted. This is a conceptual bug
+        but as we do not allow '/' in urls, it does not (yet) matter.
         """
         request=self
         request_get=request.get
@@ -350,6 +354,8 @@ class BaseRequest:
 
         # remember path for later use
         browser_path = path
+
+        maybe_utf8_encoded = True
 
         # Cleanup the path list
         if path[:1]=='/':  path=path[1:]
@@ -364,8 +370,16 @@ class BaseRequest:
                 continue
             elif item == '..':
                 del clean[-1]
-            else: clean.append(item)
+            else:
+                # check whether this segment might be utf8 encoded
+                if maybe_utf8_encoded:
+                    try: unicode(item, 'utf-8')
+                    except UnicodeError: maybe_utf8_encoded = False
+                clean.append(item)
         path=clean
+
+        # inform traversal hooks about utf8 encodedness
+        self.set('TraversalRequestMaybeUtf8Encoded', maybe_utf8_encoded)
 
         # How did this request come in? (HTTP GET, PUT, POST, etc.)
         method=req_method=request_get('REQUEST_METHOD', 'GET').upper()
@@ -489,7 +503,24 @@ class BaseRequest:
                 request['URL'] = URL = '%s/%s' % (request['URL'], step)
                 
                 try:
-                    subobject = self.traverseName(object, entry_name)
+                    try:
+                        subobject = self.traverseName(object, entry_name)
+                    except:
+                        if not maybe_utf8_encoded: raise
+                        exc_info = sys.exc_info() # save to present the original error info
+                        try:
+                            try:
+                                # need to check again as traversal hooks might
+                                # have added path elements
+                                entry_name_decoded = unicode(entry_name, 'utf-8').encode('iso-8859-1')
+                            except UnicodeError:
+                                raise exc_info
+                            if entry_name_decoded == entry_name:
+                                raise exc_info
+                            try: subobject = self.traverseName(object, entry_name_decoded)
+                            except: raise exc_info
+                            entry_name = entry_name_decoded
+                        finally: del exc_info
                     if (hasattr(object,'__bobo_traverse__') or 
                         hasattr(object, entry_name)):
                         check_name = entry_name
