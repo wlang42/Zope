@@ -95,7 +95,7 @@ class Test(unittest.TestCase):
         self.assertEqual(wids, [0])
 
     def testTermToWordIdsWithProcess_post_glob(self):
-        """This test is for added process_post_grob"""
+        """This test is for added process_post_glob"""
         class AddedSplitter(Splitter):
             def process_post_glob(self, lst):
                 assert lst == ['dogs']
@@ -106,7 +106,7 @@ class Test(unittest.TestCase):
         self.assertEqual(wids, [3])
 
     def testMissingTermToWordIdsWithProcess_post_glob(self):
-        """This test is for added process_post_grob"""
+        """This test is for added process_post_glob"""
         class AddedSplitter(Splitter):
             def process_post_glob(self, lst):
                 assert lst == ['dogs']
