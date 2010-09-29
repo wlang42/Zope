@@ -24,6 +24,7 @@ import ExtensionClass
 from Missing import MV
 from Persistence import Persistent
 from Products.PluginIndexes.interfaces import ILimitedResultIndex
+from Products.PluginIndexes.interfaces import ITransposeQuery
 
 import BTrees.Length
 from BTrees.IIBTree import intersection, weightedIntersection, IISet
@@ -438,6 +439,7 @@ class Catalog(Persistent, Acquisition.Implicit, ExtensionClass.Base):
     def make_query(self, request):
         # This is a bit of a mess, but the ZCatalog API has traditionally
         # supported passing in query restrictions in almost arbitary ways
+
         real_req = None
         if isinstance(request, dict):
             query = request.copy()
@@ -471,6 +473,13 @@ class Catalog(Persistent, Acquisition.Implicit, ExtensionClass.Base):
                 value = real_req.get(iid)
                 if value:
                     query[iid] = value
+
+        indexes = self.indexes.keys()
+        for i in indexes:
+            index = self.getIndex(i)
+            if ITransposeQuery.providedBy(index):
+                query = index.make_query(query)
+
         return query
 
     def _sorted_search_indexes(self, query):

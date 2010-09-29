@@ -25,26 +25,30 @@ from BTrees.OOBTree import OOBTree
 from BTrees.IOBTree import IOBTree
 import BTrees.Length
 
+from zope.interface import implements
+
 from ZODB.POSException import ConflictError
 
+from Products.PluginIndexes.interfaces import ITransposeQuery
 from Products.PluginIndexes.interfaces import IUniqueValueIndex
 from Products.PluginIndexes.KeywordIndex.KeywordIndex import KeywordIndex
 from Products.PluginIndexes.common.util import parseIndexRequest
 
 from util import PermuteKeywordList
 
-from config import PROJECTNAME
+
 
 _marker = []
 
-logger = logging.getLogger(PROJECTNAME)
+logger = logging.getLogger('CompositeIndex')
 
 class CompositeIndex(KeywordIndex):
 
     """Index for composition of simple fields.
        or sequences of items
     """
-
+    
+    implements(ITransposeQuery)
 
     meta_type="CompositeIndex"
 
@@ -455,6 +459,63 @@ class CompositeIndex(KeywordIndex):
             kw = self._tindex.get(k,k)
             items.append((kw, v))
         return items
+
+
+    def make_query(self, query):
+        """ optimize the query """
+        
+        cquery = query.copy()
+
+        catalog = aq_parent(self)
+
+        indexes = catalog.indexes
+
+        parent = aq_parent(catalog)
+
+        if parent.hasProperty('compositeindex') and not parent.getProperty('compositeindex',True):
+            logger.warn('skip make_query')
+            return
+        
+        cIdxs = self.getComponentIndexNames()
+
+        records=[]
+        for i in cIdxs:
+            index = indexes.get(i,None)
+            abort = False
+                    
+            if index:
+                rec = parseIndexRequest(query, index.id, index.query_options)
+                        
+                if not IUniqueValueIndex.providedBy(index):
+                    logger.warn('index %s: not an instance of IUniqueValueIndex' % index.id)
+                    abort = True
+
+                if abort or rec.keys is None:
+                    continue
+                        
+                records.append((i, rec))
+
+                        
+        # transform request only if more than one component 
+        # of the composite key is applied 
+        if len(records) > 1:
+
+            cquery.update( { cId: { 'query': records }} )
+
+                    
+            # delete obsolete query attributes from request
+            for i in cIdxs[:len(records)+1]:
+                if cquery.has_key(i):
+                    del cquery[i]
+
+            logger.debug('composite query build "%s"' % cquery)
+            return cquery
+
+        else:
+            logger.debug('only one component was affected, skip composite query build')
+            
+                    
+        return query        
     
 
     manage = manage_main = DTMLFile('dtml/manageCompositeIndex', globals())
@@ -471,82 +532,7 @@ def manage_addCompositeIndex(self, id, extra=None,
              REQUEST=REQUEST, RESPONSE=RESPONSE, URL1=URL3)
 
 
-
-class compositeSearchArgumentsMap:
-    """ parse a request from the ZPublisher to optimize the query by means
-        of CompositeIndexes
-    """
-
-    keywords = {}
     
-    def __init__(self, catalog, request):
-        """ indexes -- dict of index objects
-            request -- the request dictionary send from the ZPublisher
-        """
+
         
-        indexes = catalog.indexes
-
-        parent = aq_parent(catalog)
-
-        if parent.hasProperty('unimr.compositeindex') and not parent.getProperty('unimr.compositeindex',True):
-            logger.warn('skip compositeSearchArgumentsMap')
-            return
-        
-        cRank=[]
-        for index in indexes.values():
-            if isinstance(index,CompositeIndex):
-                
-                cId = index.id
-                logger.debug('CompositeIndex "%s" found' % cId)
-                # get indexes managed by CompositeIndex
-                cIdxs = index.getComponentIndexNames()
-                cRank.append((cId,cIdxs))
-        
-        # sort from specific to unspecific CompositeIndex
-        cRank.sort(lambda x,y: cmp((len(y[1]),y[1]),(len(x[1]),x[1])))
-
-        for cId, cIdxs in cRank:
-                records=[]
-                for i in cIdxs:
-                    index = indexes.get(i,None)
-                    abort = False
-                    
-                    if index:
-                        rec = parseIndexRequest(request, index.id, index.query_options)
-                        
-                        if not IUniqueValueIndex.providedBy(index):
-                            logger.warn('index %s: not an instance of IUniqueValueIndex' % index.id)
-                            abort = True
-
-                        if abort or rec.keys is None:
-                            continue
-                        
-                        records.append((i, rec))
-
-                        
-                # transform request only if more than one component of the composite key is applied 
-                if len(records) > 1:
-
-                    query = { cId: { 'query': records } }
-
-                    logger.debug('composite query build "%s"' % query)
-
-                    
-                    # delete obsolete query attributes from request
-                    for i in cIdxs[:len(records)+1]:
-                        
-                        if isinstance(request, dict):
-                            if request.has_key(i):
-                                del request[i]
-                        else:
-                            if request.keywords.has_key(i):
-                                del request.keywords[i]
-                            if isinstance(request.request, dict) and \
-                                   request.request.has_key(i):
-                               
-                                del request.request[i]
-
-                    request.keywords.update(query)        
- 
-
 

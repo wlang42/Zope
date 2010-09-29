@@ -236,3 +236,13 @@ class IIndexConfiguration(Interface):
             E.g. {'indexed_attrs' : ('SearchableText', )}.
             The interface does not define any specifc mapping keys.
         """
+
+
+#
+#
+#
+
+class ITransposeQuery(Interface):
+
+    def make_query(query):
+        """ returns optimized query for given index """
