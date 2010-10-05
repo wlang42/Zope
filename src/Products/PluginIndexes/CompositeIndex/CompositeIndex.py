@@ -16,9 +16,7 @@ import logging
 
 from Acquisition import aq_parent
 
-from Globals import DTMLFile
-
-from time import time
+from App.special_dtml import DTMLFile
 
 from BTrees.IIBTree import IIBTree, IITreeSet, IISet, union, intersection, difference
 from BTrees.OOBTree import OOBTree
@@ -32,6 +30,7 @@ from ZODB.POSException import ConflictError
 from Products.PluginIndexes.interfaces import ITransposeQuery
 from Products.PluginIndexes.interfaces import IUniqueValueIndex
 from Products.PluginIndexes.KeywordIndex.KeywordIndex import KeywordIndex
+
 from Products.PluginIndexes.common.util import parseIndexRequest
 
 from util import PermuteKeywordList
@@ -75,7 +74,7 @@ class CompositeIndex(KeywordIndex):
             self._cindexes[i] = OOBTree()
         
 
-    def _apply_index(self, request, cid='', type=type):
+    def _apply_index(self, request, resultset=None):
         """ Apply the index to query parameters given in the request arg. """
         
         record = parseIndexRequest(request, self.id, self.query_options)
@@ -86,7 +85,7 @@ class CompositeIndex(KeywordIndex):
                 for i,k in enumerate(record.keys):
                     record.keys[i] = hash(k)
                     
-            return super(CompositeIndex,self)._apply_index(request, cid=cid, type=type)
+            return super(CompositeIndex,self)._apply_index(request, resultset=resultset)
          
         operator = self.useOperator
 
@@ -113,14 +112,13 @@ class CompositeIndex(KeywordIndex):
         # sort from short to long sets
         rank.sort()
 
-        k     = None
+        k = None
         for l,res in rank:
 
             k = intersection(k, res)
 
             if not k:
                 break
-
 
         # if any operator of composite indexes is set to "and"
         # switch to intersecton mode
@@ -129,10 +127,10 @@ class CompositeIndex(KeywordIndex):
             set_func = union
         else:
             set_func = intersection
-
         
         rank=[]
         if set_func == intersection:
+            res = None
             for key in k:
                 set=self._index.get(key, IISet())
                 rank.append((len(set),key))
@@ -141,13 +139,13 @@ class CompositeIndex(KeywordIndex):
             rank.sort()
 
         else:
+            res = None
             # dummy length
             if k:
                 rank = enumerate(k)
 
-        res = None
-        # collect docIds
 
+        # collect docIds
         for l,key in rank:
             
             set=self._index.get(key, None)
@@ -445,6 +443,45 @@ class CompositeIndex(KeywordIndex):
         # This method is superceded by documentToKeyMap
         logger.warn('keyForDocument: return hashed key')
         return super(CompositeIndex,self).keyForDocument(id)
+
+
+    def hasUniqueValuesFor(self, name):
+        """has unique values for column name"""
+        if name in self.getComponentIndexNames():
+            return 1
+        else:
+            return 0
+
+    def uniqueValues(self, name=None, withLengths=0):
+        """returns the unique values for name
+
+        if withLengths is true, returns a sequence of
+        tuples of (value, length)
+        """
+
+        # default: return unique values from first component
+
+        if name is None:
+            name = self.getComponentIndexNames()[0]
+        
+        if self._cindexes.has_key(name):
+            index = self._cindexes[name]
+        else:
+            return []
+
+        if not withLengths:
+            return tuple(index.keys())
+        else:
+            rl=[]
+            for i in index.keys():
+                set = index[i]
+                if isinstance(set, int):
+                    l = 1
+                else:
+                    l = len(set)
+                rl.append((i, l))
+            return tuple(rl)
+
     
     def documentToKeyMap(self):
         logger.warn('documentToKeyMap: return hashed key map')
@@ -466,56 +503,43 @@ class CompositeIndex(KeywordIndex):
         
         cquery = query.copy()
 
-        catalog = aq_parent(self)
-
-        indexes = catalog.indexes
-
-        parent = aq_parent(catalog)
-
-        if parent.hasProperty('compositeindex') and not parent.getProperty('compositeindex',True):
-            logger.warn('skip make_query')
-            return
-        
         cIdxs = self.getComponentIndexNames()
 
         records=[]
-        for i in cIdxs:
-            index = indexes.get(i,None)
+        for name in cIdxs:
             abort = False
                     
-            if index:
-                rec = parseIndexRequest(query, index.id, index.query_options)
-                        
-                if not IUniqueValueIndex.providedBy(index):
-                    logger.warn('index %s: not an instance of IUniqueValueIndex' % index.id)
-                    abort = True
+            #TODO query_options
+            # if intex_type == "FieldIndex":
+            #    query_options = ["query","range"]
+            # elif intex_type == "KeywordIndex":
+            #    query_options = ["query","operator","range"]
 
-                if abort or rec.keys is None:
-                    continue
+            query_options = ["query","range"]
+            rec = parseIndexRequest(query, name, query_options)
                         
-                records.append((i, rec))
+
+
+            if rec.keys is None:
+                continue
+                        
+            records.append((name, rec))
 
                         
-        # transform request only if more than one component 
-        # of the composite key is applied 
-        if len(records) > 1:
 
-            cquery.update( { cId: { 'query': records }} )
+
+        cquery.update( { self.id: { 'query': records }} )
 
                     
-            # delete obsolete query attributes from request
-            for i in cIdxs[:len(records)+1]:
-                if cquery.has_key(i):
-                    del cquery[i]
+        # delete obsolete query attributes from request
+        for i in cIdxs[:len(records)+1]:
+            if cquery.has_key(i):
+                del cquery[i]
 
-            logger.debug('composite query build "%s"' % cquery)
-            return cquery
+        logger.debug('composite query build "%s"' % cquery)
+        
+        return cquery
 
-        else:
-            logger.debug('only one component was affected, skip composite query build')
-            
-                    
-        return query        
     
 
     manage = manage_main = DTMLFile('dtml/manageCompositeIndex', globals())
