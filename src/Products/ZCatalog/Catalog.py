@@ -24,6 +24,7 @@ import ExtensionClass
 from Missing import MV
 from Persistence import Persistent
 from Products.PluginIndexes.interfaces import ILimitedResultIndex
+from Products.PluginIndexes.interfaces import IUniqueValueIndex
 from Products.PluginIndexes.interfaces import ITransposeQuery
 
 import BTrees.Length
@@ -395,10 +396,16 @@ class Catalog(Persistent, Acquisition.Implicit, ExtensionClass.Base):
                       'attempted to uncatalog an object '
                       'with a uid of %s. ' % str(uid))
 
-
     def uniqueValuesFor(self, name):
         """ return unique values for FieldIndex name """
-        return self.getIndex(name).uniqueValues()
+
+        indexes = self.indexes.keys()
+        for idx in indexes:
+            x = self.getIndex(idx)
+            if IUniqueValueIndex.providedBy(x) and x.hasUniqueValuesFor(name):
+                return x.uniqueValues(name=name)
+
+        return []
 
     def hasuid(self, uid):
         """ return the rid if catalog contains an object with uid """
