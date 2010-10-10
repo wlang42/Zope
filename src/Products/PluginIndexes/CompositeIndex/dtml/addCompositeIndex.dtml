@@ -26,7 +26,7 @@ object.
     </div>
     </td>
     <td align="left" valign="top">
-    <input type="text" name="id" size="40" />
+    <input type="text" name="id" size="10" />
     </td>
   </tr>
 
@@ -38,9 +38,13 @@ object.
     </div>
     </td>
     <td align="left" valign="top">
-    <input type="text" name="extra.indexed_attrs:record:string" size="40" /><br/>
-    <em>indexId1,indexId2,...</em> or<br/>
-    <em>indexId1:attribute11:attribute12:...,indexId2:attribute21,...</em>
+    <input type="text" name="extra.id:records:string" size="10" />
+    <select name="extra.type:records:string">
+       <option value="">FieldIndex</option>
+       <option value="">KeywordIndex</option>
+    </select>
+    <input type="text" name="extra.attributes:records:string" size="40" /><br/>
+    
     </td>
   </tr>
 

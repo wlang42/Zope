@@ -54,7 +54,10 @@ class CompositeIndexTests( unittest.TestCase ):
 
     def setUp(self):
 
-        self._index = CompositeIndex('comp01',extra = {'indexed_attrs': 'is_default_page,review_state,portal_type'})
+        self._index = CompositeIndex('comp01',
+                                     extra = [ { 'id': 'is_default_page' ,'type': 'FieldIndex','attributes':''},
+                                               { 'id': 'review_state' ,'type': 'FieldIndex','attributes':''},
+                                               { 'id': 'portal_type' ,'type': 'FieldIndex','attributes':''}])
         
         self._field_indexes = ( FieldIndex('review_state'), FieldIndex('portal_type'), FieldIndex('is_default_page'))
 
@@ -67,26 +70,32 @@ class CompositeIndexTests( unittest.TestCase ):
             r = index._apply_index(req)
             if r is not None:
                 r, u = r
-            w, rs = weightedIntersection(rs, r)
-            if not rs:
-                break
-        return rs
+                w, rs = weightedIntersection(rs, r)
+                if not rs:
+                    break
+        if not rs:
+            return set()
+        return set(rs)
 
     
     def _compositeSearch(self, req, expectedValues=None):
+        
         query = self._index.make_query(req)
         rs = None
         r =  self._index._apply_index(query)
         if r is not None:
             r, u = r
-        w, rs = weightedIntersection(rs, r)
-        return rs
+            w, rs = weightedIntersection(rs, r)
+        if not rs:
+            return set()
+        return set(rs)
     
 
     def _populateIndexes(self, k , v):
         self._index.index_object( k, v )
         for index in self._field_indexes:
             index.index_object( k, v )
+
 
 
     def _clearIndexes(self):
@@ -96,9 +105,10 @@ class CompositeIndexTests( unittest.TestCase ):
 
     def testPerformance(self):
 
-        lengths = [10,100,1000,10000,100000]
+        lengths = [1000,10000,100000]
 
-        queries = [{  'portal_type' : { 'query': 'Document' } , 
+        queries = [{  'portal_type' : { 'query': 'Document' }} ,
+                   {  'portal_type' : { 'query': 'Document' } , 
                       'review_state' : { 'query': 'pending' } }  ,\
                    {  'is_default_page': { 'query' : True }, 
                       'portal_type' : { 'query': 'Document' } , 
@@ -110,18 +120,16 @@ class CompositeIndexTests( unittest.TestCase ):
 
             st = time()
             res1 = self._defaultSearch(*args, **kw)
-            print list(res1)
             print "atomic:    %s hits in %3.2fms" % (len(res1), (time() -st)*1000)
 
             st = time()
             res2 = self._compositeSearch(*args, **kw)
-            print list(res2)
             print "composite: %s hits in %3.2fms" % (len(res2), (time() -st)*1000)
 
             self.assertEqual(len(res1),len(res2))
+            
+            self.assertEqual(res1,res2)
 
-            for i,v in enumerate(res1):
-                self.assertEqual(res1[i], res2[i])  
 
 
 
@@ -130,13 +138,11 @@ class CompositeIndexTests( unittest.TestCase ):
             print "************************************" 
             print "indexed objects: %s" % l
             for i  in range(l):
-                name = 'dummy%s' % i
+                name = '%s' % i
                 obj = RandomTestObject(name)
-                print obj
                 self._populateIndexes(i,obj)
 
             for query in queries:
-                print query
                 profileSearch(query)
 
 

@@ -15,13 +15,16 @@ import sys
 import logging
 
 from Acquisition import aq_parent
+from Persistence import PersistentMapping
+
 
 from App.special_dtml import DTMLFile
 
 from BTrees.IIBTree import IIBTree, IITreeSet, IISet, union, intersection, difference
 from BTrees.OOBTree import OOBTree
 from BTrees.IOBTree import IOBTree
-import BTrees.Length
+from BTrees.Length import Length
+
 
 from zope.interface import implements
 
@@ -29,19 +32,52 @@ from ZODB.POSException import ConflictError
 
 from Products.PluginIndexes.interfaces import ITransposeQuery
 from Products.PluginIndexes.interfaces import IUniqueValueIndex
-from Products.PluginIndexes.KeywordIndex.KeywordIndex import KeywordIndex
-
+from Products.PluginIndexes.common.UnIndex import UnIndex
 from Products.PluginIndexes.common.util import parseIndexRequest
+from Products.PluginIndexes.common import safe_callable
 
 from util import PermuteKeywordList
 
-
+QUERY_OPTIONS = { 'FieldIndex' :  ["query","range"] ,
+                  'KeywordIndex' : ["query","operator","range"] }
 
 _marker = []
 
 logger = logging.getLogger('CompositeIndex')
 
-class CompositeIndex(KeywordIndex):
+
+class Component:
+
+    def __init__(self,id,type,attributes):
+        
+        self._id = id
+        self._type = type
+        
+        if isinstance(attributes, str):
+            self._attributes = attributes.split(',')
+        else:
+            self._attributes = list(attributes)
+            
+        self._attributes = [ attr.strip() for attr in self._attributes if attr ]
+        
+
+    @property
+    def id(self):
+        return self._id
+
+    @property
+    def type(self):
+        return self._type
+
+    @property
+    def attributes(self):
+        if not self._attributes:
+            return [self._id]
+        return self._attributes
+
+
+
+class CompositeIndex(UnIndex):
 
     """Index for composition of simple fields.
        or sequences of items
@@ -60,8 +96,80 @@ class CompositeIndex(KeywordIndex):
          'help': ('CompositeIndex','CompositeIndex_Settings.stx')},
     )
 
+    query_options = ("query","operator", "range")
+
+    def __init__(
+        self, id, ignore_ex=None, call_methods=None, extra=None, caller=None):
+        """Create an unindex
+
+        UnIndexes are indexes that contain two index components, the
+        forward index (like plain index objects) and an inverted
+        index.  The inverted index is so that objects can be unindexed
+        even when the old value of the object is not known.
+
+        e.g.
+
+        self._index = {datum:[documentId1, documentId2]}
+        self._unindex = {documentId:datum}
+
+        If any item in self._index has a length-one value, the value is an
+        integer, and not a set.  There are special cases in the code to deal
+        with this.
+
+        The arguments are:
+
+          'id' -- the name of the item attribute to index.  This is
+          either an attribute name or a record key.
+
+          'ignore_ex' -- should be set to true if you want the index
+          to ignore exceptions raised while indexing instead of
+          propagating them.
+
+          'call_methods' -- should be set to true if you want the index
+          to call the attribute 'id' (note: 'id' should be callable!)
+          You will also need to pass in an object in the index and
+          uninded methods for this to work.
+
+          'extra' -- a mapping object that keeps additional
+          index-related parameters - subitem 'indexed_attrs'
+          can be list of dicts with following keys { id, type, attributes }
+
+          'caller' -- reference to the calling object (usually
+          a (Z)Catalog instance
+        """
+
+        def _get(o, k, default):
+            """ return a value for a given key of a dict/record 'o' """
+            if isinstance(o, dict):
+                return o.get(k, default)
+            else:
+                return getattr(o, k, default)
+
+        self.id = id
+        self.ignore_ex=ignore_ex        # currently unimplimented
+        self.call_methods=call_methods
+
+        self.operators = ('or', 'and')
+        self.useOperator = 'or'
+
+        # set components
+        self._components = PersistentMapping()
+        for cdata in extra:
+            c_id = cdata['id']
+            c_type = cdata['type']
+            c_attributes = cdata['attributes']  
+            self._components[c_id] = Component(c_id,c_type,c_attributes)
+
+        if not self._components:
+            self._components[id] = Component(id,'KeywordIndex',None)
+        
+        self._length = Length()
+        self.clear()
+
+
+
     def clear(self):
-        self._length = BTrees.Length.Length()
+        self._length = Length()
         self._index = IOBTree()
         self._unindex = IOBTree()
 
@@ -90,7 +198,6 @@ class CompositeIndex(KeywordIndex):
         operator = self.useOperator
 
         rank=[]
-        
         for c, rec in record.keys:
             # experimental code for specifing the operator
             if operator == self.useOperator:
@@ -98,14 +205,14 @@ class CompositeIndex(KeywordIndex):
                 
             if not operator in self.operators :
                 raise RuntimeError,"operator not valid: %s" % escape(operator)
-
+            
             res = self._apply_component_index(rec,c)
-
+            
             if res is None:
                 continue
                 
             res, dummy  = res 
-
+            
             rank.append((len(res),res))
 
 
@@ -113,10 +220,11 @@ class CompositeIndex(KeywordIndex):
         rank.sort()
 
         k = None
+        
         for l,res in rank:
 
             k = intersection(k, res)
-
+            
             if not k:
                 break
 
@@ -124,44 +232,49 @@ class CompositeIndex(KeywordIndex):
         # switch to intersecton mode
         
         if operator == 'or':
+            res = None
             set_func = union
         else:
+            res = resultset
             set_func = intersection
+
+        
         
         rank=[]
         if set_func == intersection:
-            res = None
             for key in k:
-                set=self._index.get(key, IISet())
-                rank.append((len(set),key))
+                
+                s=self._index.get(key, IISet())
+                if isinstance(s, int):
+                    rank.append((1,key))
+                else:
+                    rank.append((len(s),key))
         
             # sort from short to long sets
             rank.sort()
-
+            
         else:
-            res = None
             # dummy length
             if k:
                 rank = enumerate(k)
 
-
         # collect docIds
         for l,key in rank:
             
-            set=self._index.get(key, None)
-            if set is None:
-                set = IISet(())
-            elif isinstance(set, int):
-                set = IISet((set,))
-            res = set_func(res, set)
+            s=self._index.get(key, None)
+            if s is None:
+                s = IISet(())
+            elif isinstance(s, int):
+                s = IISet((s,))
+            res = set_func(res, s)
             if not res and set_func is intersection:
                 break
 
 
-        if isinstance(res, int):  r=IISet((res,))
+        if isinstance(res, int):  res = IISet((res,))
 
         if res is None:
-            return IISet(),(self.id,)
+            res = IISet(),(self.id,)
 
         return res, (self.id,)
         
@@ -201,18 +314,19 @@ class CompositeIndex(KeywordIndex):
             else:
                 setlist = index.items(lo)
 
-            for k, set in setlist:
-                if isinstance(set, tuple):
-                    set = IISet((set,))
+            for k, s in setlist:
+                if isinstance(s, tuple):
+                    s = IISet((s,))
                 r = union(r, set)
         else: # not a range search
             for key in record.keys:
-                set=index.get(key, None)
-                if set is None:
-                    set = IISet(())
-                elif isinstance(set, int):
-                    set = IISet((set,))
-                r = union(r, set)
+                s=index.get(key, None)
+
+                if s is None:
+                    s = IISet(())
+                elif isinstance(s, int):
+                    s = IISet((s,))
+                r = union(r, s)
 
         if isinstance(r, int):
             r=IISet((r,))
@@ -232,7 +346,7 @@ class CompositeIndex(KeywordIndex):
         return res
 
 
-    def _index_object(self, documentId, obj, threshold=None, attr=''):
+    def _index_object(self, documentId, obj, threshold=None):
         """ index an object 'obj' with integer id 'i'
 
         Ideally, we've been passed a sequence of some sort that we
@@ -246,17 +360,14 @@ class CompositeIndex(KeywordIndex):
         # we'll do so.
 
         # unhashed keywords
-        newUKeywords = self._get_object_keywords(obj, attr)
-
-        
+        newUKeywords = self._get_permuted_keywords(obj)
+                
         # hashed keywords
         newKeywords = map(lambda x: hash(x),newUKeywords)
         
         for i, kw in enumerate(newKeywords):
             if not self._tindex.get(kw,None):
                 self._tindex[kw]=newUKeywords[i]
-
-
             
         newKeywords = map(lambda x: hash(x),newUKeywords)
 
@@ -297,6 +408,25 @@ class CompositeIndex(KeywordIndex):
                         self.insertForwardIndexEntry(kw, documentId)
 
         return 1
+
+
+    def unindex_objectKeywords(self, documentId, keywords):
+        """ carefully unindex the object with integer id 'documentId'"""
+
+        if keywords is not None:
+            for kw in keywords:
+                self.removeForwardIndexEntry(kw, documentId)
+
+    def unindex_object(self, documentId):
+        """ carefully unindex the object with integer id 'documentId'"""
+
+        keywords = self._unindex.get(documentId, None)
+        self.unindex_objectKeywords(documentId, keywords)
+        try:
+            del self._unindex[documentId]
+        except KeyError:
+            logger.debug('Attempt to unindex nonexistent'
+                         ' document id %s' % documentId)    
 
 
     def insertForwardIndexEntry(self, entry, documentId):
@@ -382,49 +512,78 @@ class CompositeIndex(KeywordIndex):
                              'should not happen.' % (self.__class__.__name__,
                                                     repr(components),str(self.id),str(c)))
         
-    def _get_object_keywords(self, obj, attr):
-        """ composite keyword lists """    
+    def _get_permuted_keywords(self, obj):
+        """ returns permutation list of object keywords """    
 
-        fields = self.getComponentIndexAttributes()
+        components = self.getIndexComponents()
          
         kw_list = []
-
-        for attributes in fields:
-            kw = []
-            for attr in attributes:
-                kw.extend(list(super(CompositeIndex,self)._get_object_keywords(obj, attr)))
+        
+        for c in components:
+            kw=self._get_keywords(obj, c)
             kw_list.append(kw)
         
         pkl = PermuteKeywordList(kw_list)
 
         return pkl.keys
 
+
+    def _get_keywords(self,obj,component):
+
+        if component.type == 'FieldIndex':
+            attr = component.attributes[-1]
+            try:
+                datum = getattr(obj, attr)
+                if safe_callable(datum):
+                    datum = datum()
+            except (AttributeError, TypeError):
+                datum = _marker
+            if isinstance(datum,list):
+                datum = tuple(datum)
+            return (datum,)
+
+        elif component.type == 'KeywordIndex':
+            for attr in component.attributes:
+                datum = []
+                newKeywords = getattr(obj, attr, ())
+                if safe_callable(newKeywords):
+                    try:
+                        newKeywords = newKeywords()
+                    except AttributeError:
+                        continue
+                if not newKeywords and newKeywords is not False:
+                    continue
+                elif isinstance(newKeywords, basestring): #Python 2.1 compat isinstance
+                    datum.append(newKeywords)
+                else:
+                    unique = {}
+                    try:
+                        for k in newKeywords:
+                            unique[k] = None
+                    except TypeError:
+                        # Not a sequence
+                        datum.append(newKeywords)
+                    else:
+                        datum.extend(unique.keys())
+            return datum
+        else:
+            raise KeyError
+
+    def getIndexComponents(self):
+        """ return sequence of indexed attributes """
+        return self._components.values()
+
+ 
     def getComponentIndexNames(self):
         """ returns component index names to composite """
 
-        ids = []
-
-        fields = self.getIndexSourceNames()
-        for attr in fields:
-            c = attr.split(':')
-            ids.append(c.pop())
-
-        return tuple(ids)
+        return self._components.keys()
 
     def getComponentIndexAttributes(self):
         """ returns list of attributes of each component index to composite"""
 
-        attributes=[]
-        
-        fields = self.getIndexSourceNames()
-        for idx in fields:
-            attr =  idx.split(':')
-            if len(attr) == 1:
-                attributes.append(attr) 
-            else:
-                attributes.append(attr[1:])
+        return tuple([a.attributes for a in self._components.values()])
 
-        return tuple(attributes)
 
     def getEntryForObject(self, documentId, default=_marker):
         """Takes a document ID and returns all the information we have
@@ -461,8 +620,9 @@ class CompositeIndex(KeywordIndex):
 
         # default: return unique values from first component
 
-        if name is None:
-            name = self.getComponentIndexNames()[0]
+        if name is None: 
+            return super(CompositeIndex,self).uniqueValues( name=name, withLengths=withLengths)
+
         
         if self._cindexes.has_key(name):
             index = self._cindexes[name]
@@ -503,44 +663,32 @@ class CompositeIndex(KeywordIndex):
         
         cquery = query.copy()
 
-        cIdxs = self.getComponentIndexNames()
+        components = self.getIndexComponents()
 
         records=[]
-        for name in cIdxs:
-            abort = False
-                    
-            #TODO query_options
-            # if intex_type == "FieldIndex":
-            #    query_options = ["query","range"]
-            # elif intex_type == "KeywordIndex":
-            #    query_options = ["query","operator","range"]
-
-            query_options = ["query","range"]
-            rec = parseIndexRequest(query, name, query_options)
-                        
-
+ 
+        for c in components:
+            query_options = QUERY_OPTIONS[c.type]
+            rec = parseIndexRequest(query, c.id, query_options)
 
             if rec.keys is None:
                 continue
-                        
-            records.append((name, rec))
 
-                        
+            records.append((c.id, rec))
 
+        if not records:
+            return query
 
         cquery.update( { self.id: { 'query': records }} )
-
                     
         # delete obsolete query attributes from request
-        for i in cIdxs[:len(records)+1]:
+        for i in [ r[0] for r in records ]:
             if cquery.has_key(i):
                 del cquery[i]
 
         logger.debug('composite query build "%s"' % cquery)
         
         return cquery
-
-    
 
     manage = manage_main = DTMLFile('dtml/manageCompositeIndex', globals())
     manage_main._setName('manage_main')
