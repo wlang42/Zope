@@ -21,6 +21,7 @@ from Persistence import PersistentMapping
 from App.special_dtml import DTMLFile
 
 from BTrees.IIBTree import IIBTree, IITreeSet, IISet, union, intersection, difference
+from BTrees.IIBTree import multiunion
 from BTrees.OOBTree import OOBTree
 from BTrees.IOBTree import IOBTree
 from BTrees.Length import Length
@@ -36,7 +37,7 @@ from Products.PluginIndexes.common.UnIndex import UnIndex
 from Products.PluginIndexes.common.util import parseIndexRequest
 from Products.PluginIndexes.common import safe_callable
 
-from util import PermuteKeywordList
+from util import PermuteKeywordList, powerset
 
 QUERY_OPTIONS = { 'FieldIndex' :  ["query","range"] ,
                   'KeywordIndex' : ["query","operator","range"] }
@@ -197,89 +198,44 @@ class CompositeIndex(UnIndex):
          
         operator = self.useOperator
 
-        rank=[]
+    
+        tmp = []
         for c, rec in record.keys:
-            # experimental code for specifing the operator
-            if operator == self.useOperator:
-                operator = rec.get('operator',operator)
-                
-            if not operator in self.operators :
-                raise RuntimeError,"operator not valid: %s" % escape(operator)
-            
-            res = self._apply_component_index(rec,c)
-            
-            if res is None:
+            res, dummy = self._apply_component_index(rec,c)
+            tmp.append(res)
+
+        if len(tmp) > 2:
+            setlist = sorted(tmp, key=len)
+        else:
+            setlist = tmp
+
+        ks = None
+        for s in setlist:
+            ks = intersection(ks, s)
+            if not ks:
+                break
+
+        tmp = []
+        for k in ks:
+            ds = self._index.get(k, None)
+            if ds is None:
                 continue
-                
-            res, dummy  = res 
-            
-            rank.append((len(res),res))
+            elif isinstance(ds, int):
+                ds = IISet((ds,))
+            tmp.append(ds)
 
+        r = multiunion(tmp)
 
-        # sort from short to long sets
-        rank.sort()
-
-        k = None
-        
-        for l,res in rank:
-
-            k = intersection(k, res)
-            
-            if not k:
-                break
-
-        # if any operator of composite indexes is set to "and"
-        # switch to intersecton mode
-        
-        if operator == 'or':
-            res = None
-            set_func = union
+        if isinstance(r, int):
+            r = IISet((r, ))
+        if r is None:
+            return IISet(), (self.id,)
         else:
-            res = resultset
-            set_func = intersection
-
-        
-        
-        rank=[]
-        if set_func == intersection:
-            for key in k:
-                
-                s=self._index.get(key, IISet())
-                if isinstance(s, int):
-                    rank.append((1,key))
-                else:
-                    rank.append((len(s),key))
-        
-            # sort from short to long sets
-            rank.sort()
+            return r, (self.id,)
             
-        else:
-            # dummy length
-            if k:
-                rank = enumerate(k)
-
-        # collect docIds
-        for l,key in rank:
-            
-            s=self._index.get(key, None)
-            if s is None:
-                s = IISet(())
-            elif isinstance(s, int):
-                s = IISet((s,))
-            res = set_func(res, s)
-            if not res and set_func is intersection:
-                break
 
 
-        if isinstance(res, int):  res = IISet((res,))
-
-        if res is None:
-            res = IISet(),(self.id,)
-
-        return res, (self.id,)
-        
-
-    def _apply_component_index(self, record, cid):
+    def _apply_component_index(self, record, cid,resultset = None):
         """ Apply the component index to query parameters given in the record arg. """
         
         if record.keys==None: return None
@@ -288,7 +244,10 @@ class CompositeIndex(UnIndex):
         r     = None
         opr   = None
 
- 
+        operator = record.get('operator',self.useOperator)
+        if not operator in self.operators :
+            raise RuntimeError,"operator not valid: %s" % escape(operator)
+        
         # Range parameter
         range_parm = record.get('range',None)
         if range_parm:
@@ -304,29 +263,51 @@ class CompositeIndex(UnIndex):
             opr = record.usage.lower().split(':')
             opr, opr_args=opr[0], opr[1:]
 
+
         if opr=="range":   # range search
             if 'min' in opr_args: lo = min(record.keys)
             else: lo = None
             if 'max' in opr_args: hi = max(record.keys)
             else: hi = None
             if hi:
-                setlist = index.items(lo,hi)
+                setlist = index.values(lo,hi)
             else:
-                setlist = index.items(lo)
+                setlist = index.values(lo)
 
-            for k, s in setlist:
+            tmp=[]
+            for s in setlist:
                 if isinstance(s, tuple):
                     s = IISet((s,))
-                r = union(r, set)
+                tmp.append(s)
+            
+            r = multiunion(tmp)
+                
         else: # not a range search
-            for key in record.keys:
-                s=index.get(key, None)
 
+            tmp = []
+            if operator == 'or':
+                for key in record.keys:
+                    s=index.get(key, None)
+                    if s is None:
+                        continue
+                    elif isinstance(s, int):
+                        s = IISet((s,))
+                    tmp.append(s)
+
+                r = multiunion(tmp)
+
+            else:
+                r = None
+                if len(record.keys) > 1:
+                    key = tuple(sorted(record.keys))
+                else:
+                    key = record.keys[0]
+                s=index.get(key, None)
                 if s is None:
-                    s = IISet(())
+                    s = IISet()
                 elif isinstance(s, int):
                     s = IISet((s,))
-                r = union(r, s)
+                r = s    
 
         if isinstance(r, int):
             r=IISet((r,))
@@ -361,7 +342,7 @@ class CompositeIndex(UnIndex):
 
         # unhashed keywords
         newUKeywords = self._get_permuted_keywords(obj)
-                
+        
         # hashed keywords
         newKeywords = map(lambda x: hash(x),newUKeywords)
         
@@ -565,6 +546,9 @@ class CompositeIndex(UnIndex):
                         datum.append(newKeywords)
                     else:
                         datum.extend(unique.keys())
+                    
+            datum.sort()
+            datum.extend(powerset(datum,start=2))
             return datum
         else:
             raise KeyError

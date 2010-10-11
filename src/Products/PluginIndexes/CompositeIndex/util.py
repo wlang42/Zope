@@ -11,6 +11,7 @@
 #
 ##############################################################################
 
+from itertools import chain, combinations
 
 _marker = []
 
@@ -95,3 +96,6 @@ class PermuteKeywordList:
 
 
 
+def powerset(iterable,start=0):
+    s = list(iterable)
+    return chain.from_iterable(combinations(s, r) for r in range(start,len(s)+1))
