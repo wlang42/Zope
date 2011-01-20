@@ -19,7 +19,7 @@ import os
 from sys import stdin, stdout
 from ZPublisher.HTTPRequest import HTTPRequest
 from ZPublisher.HTTPResponse import HTTPResponse
-from ZPublisher.BaseRequest import RequestContainer
+from zope.globalrequest import setRequest
 
 def makerequest(app, stdout=stdout, environ=None):
     """
@@ -61,6 +61,6 @@ def makerequest(app, stdout=stdout, environ=None):
     # Zope3-style view look-ups.
     from zope.publisher.browser import setDefaultSkin
     setDefaultSkin(req)
+    setRequest(req)
 
-    requestcontainer = RequestContainer(REQUEST = req)
-    return app.__of__(requestcontainer)
+    return app

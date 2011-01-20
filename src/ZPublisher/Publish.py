@@ -24,6 +24,7 @@ from zope.publisher.interfaces import ISkinnable
 from zope.publisher.skinnable import setDefaultSkin
 from zope.security.management import newInteraction, endInteraction
 from zope.event import notify
+from zope.globalrequest import setRequest, clearRequest
 
 from pubevents import PubStart, PubSuccess, PubFailure, \
      PubBeforeCommit, PubAfterTraversal, PubBeforeAbort
@@ -227,13 +228,14 @@ def publish_module_standard(module_name,
 
             if request is None:
                 request=Request(stdin, environ, response)
-
+            
             # make sure that the request we hand over has the
             # default layer/skin set on it; subsequent code that
             # wants to look up views will likely depend on it
             if ISkinnable.providedBy(request):
                 setDefaultSkin(request)
 
+            setRequest(request)
             response = publish(request, module_name, after_list, debug=debug)
         except (SystemExit, ImportError):
             # XXX: Rendered ImportErrors were never caught here because they
@@ -261,6 +263,7 @@ def publish_module_standard(module_name,
         if after_list[0] is not None: after_list[0]()
 
     finally:
+        clearRequest()
         if request is not None: request.close()
 
     if must_die:

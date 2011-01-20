@@ -21,6 +21,7 @@ import interfaces
 import connections
 import layer
 
+from zope.globalrequest import setRequest, clearRequest
 from zope.interface import implements
 from AccessControl.SecurityManagement import noSecurityManager
 
@@ -120,6 +121,7 @@ class TestCase(unittest.TestCase, object):
             self.beforeClose()
         self._close()
         self.logout()
+        clearRequest()
         self.afterClear()
 
     def _close(self):

@@ -39,6 +39,7 @@ from Persistence import Persistent
 from webdav.NullResource import NullResource
 from zExceptions import Redirect as RedirectException, Forbidden
 
+from zope.globalrequest import getRequest
 from zope.interface import implements
 
 import Folder
@@ -224,6 +225,25 @@ class Application(ApplicationDefaultPermissions,
         if reg is None:
             reg = {}
         return reg.get(flag)
+
+    @property
+    def REQUEST(self):
+        # Return the current request
+        request = self.__dict__.get('REQUEST', None)
+        if request is None:
+            request = getRequest()
+        if request is None:
+            raise AttributeError('REQUEST')
+        return request
+    
+    @REQUEST.setter
+    def REQUEST(self, value):
+        # Set the current request as an attribute (used in tests)
+        self.__dict__['REQUEST'] = value
+
+    @REQUEST.deleter
+    def REQUEST(self):
+        del self.__dict__['REQUEST']
 
 InitializeClass(Application)
 
