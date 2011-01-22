@@ -118,6 +118,16 @@ def makerequest(app, stdout=sys.stdout):
     return _makerequest(app, stdout=stdout, environ=environ)
 
 
+def makerequest(stdout=sys.stdout):
+    '''Wraps the app into a fresh REQUEST.'''
+    from Testing.makerequest import newrequest as _newrequest
+    environ = {}
+    environ['SERVER_NAME'] = _Z2HOST or 'nohost'
+    environ['SERVER_PORT'] = '%d' % (_Z2PORT or 80)
+    environ['REQUEST_METHOD'] = 'GET'
+    return _newrequest(stdout=stdout, environ=environ)
+
+
 def appcall(func, *args, **kw):
     '''Calls a function passing 'app' as first argument.'''
     from base import app, close
