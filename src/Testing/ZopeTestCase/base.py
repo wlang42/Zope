@@ -107,7 +107,11 @@ class TestCase(unittest.TestCase, object):
 
     def _app(self):
         '''Returns the app object for a test.'''
-        return app()
+        app = Zope2.app()
+        req = utils.newrequest()
+        setRequest(req)
+        connections.register(app)
+        return app
 
     def _setup(self):
         '''Sets up the fixture. Framework authors may
