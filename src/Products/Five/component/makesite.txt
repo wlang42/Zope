@@ -32,7 +32,6 @@ Create the test browser we'll be using:
 
     >>> from Testing.testbrowser import Browser
     >>> browser = Browser()
-    >>> browser.handleErrors = False
     >>> browser.addHeader('Authorization', 'Basic manager:r00t')
 
 Let's add a folder:
