@@ -245,6 +245,14 @@ class Application(ApplicationDefaultPermissions,
     def REQUEST(self):
         del self.__dict__['REQUEST']
 
+    @property
+    def aq_explicit(self):
+        # aq_explict is a property of acquisition wrappers. As the Application
+        # object is no longer wrapped in a RequestContainer, it must be
+        # supported directly.
+        return self
+
+
 InitializeClass(Application)
 
 
