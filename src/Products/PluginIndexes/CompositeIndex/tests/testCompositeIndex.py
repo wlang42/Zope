@@ -1,6 +1,6 @@
 import unittest
 import Zope2
-Zope2.startup()
+#Zope2.startup()
 
 import string, random
 
@@ -18,21 +18,22 @@ from Products.PluginIndexes.CompositeIndex.CompositeIndex import CompositeIndex
 states = ['published','pending','private','intranet']
 types  = ['Document','News','File','Image']
 default_pages = [True,False,False,False,False,False]
-
+keywords = map(lambda x: 'subject_%s' % x,range(1,6))
 
 class TestObject(object):
 
-    def __init__(self, id, portal_type, review_state,is_default_page=False):
+    def __init__(self, id, portal_type, review_state,is_default_page=False,subject= []):
         self.id = id
         self.portal_type = portal_type
         self.review_state = review_state
         self.is_default_page = is_default_page
+        self.subject=subject
 
     def getPhysicalPath(self):
         return ['',self.id,]
 
     def __repr__(self):
-        return "< %s, %s, %s, %s >" % (self.id,self.portal_type,self.review_state,self.is_default_page)
+        return "< %s, %s, %s, %s, %s >" % (self.id,self.portal_type,self.review_state,self.is_default_page,subject)
         
 class RandomTestObject(TestObject):
 
@@ -47,7 +48,10 @@ class RandomTestObject(TestObject):
         i = random.randint(0,len(default_pages)-1)
         is_default_page = default_pages[i]
         
-        super(RandomTestObject,self).__init__(id,portal_type,review_state,is_default_page)
+        #subject = random.sample(keywords,random.randint(1,int(len(keywords)*0.2)))
+        subject = random.sample(keywords,random.randint(1,len(keywords)))
+
+        super(RandomTestObject,self).__init__(id,portal_type,review_state,is_default_page,subject)
 
 
 class CompositeIndexTests( unittest.TestCase ):
@@ -55,11 +59,13 @@ class CompositeIndexTests( unittest.TestCase ):
     def setUp(self):
 
         self._index = CompositeIndex('comp01',
-                                     extra = [ { 'id': 'is_default_page' ,'type': 'FieldIndex','attributes':''},
-                                               { 'id': 'review_state' ,'type': 'FieldIndex','attributes':''},
-                                               { 'id': 'portal_type' ,'type': 'FieldIndex','attributes':''}])
+                                     extra = [ { 'id': 'is_default_page' ,'meta_type': 'FieldIndex','attributes':''},
+                                               { 'id': 'review_state' ,'meta_type': 'FieldIndex','attributes':''},
+                                               { 'id': 'portal_type' ,'meta_type': 'FieldIndex','attributes':''},
+                                               {'id': 'subject' ,'meta_type': 'KeywordIndex','attributes':''}         
+])
         
-        self._field_indexes = ( FieldIndex('review_state'), FieldIndex('portal_type'), FieldIndex('is_default_page'))
+        self._field_indexes = ( FieldIndex('review_state'), FieldIndex('portal_type'), FieldIndex('is_default_page'),KeywordIndex('subject'))
 
         
 
@@ -109,11 +115,15 @@ class CompositeIndexTests( unittest.TestCase ):
 
         queries = [{  'portal_type' : { 'query': 'Document' }} ,
                    {  'portal_type' : { 'query': 'Document' } , 
-                      'review_state' : { 'query': 'pending' } }  ,\
-                   {  'is_default_page': { 'query' : True }, 
+                      'review_state' : { 'query': 'pending' }}  ,\
+                   {  'is_default_page': { 'query' : False }, 
                       'portal_type' : { 'query': 'Document' } , 
-                      'review_state' : { 'query' : 'pending'}}
-                   ]        
+                      'review_state' : { 'query' : 'pending'}},
+                   {  'is_default_page': { 'query' : False },
+                      'portal_type' : { 'query': 'Document' } ,
+                      'review_state' : { 'query' : 'private'},
+                      'subject': { 'query' : ['subject_2','subject_3'] ,'operator': 'or' }},
+                   ]
 
         def profileSearch(*args, **kw):
 
@@ -125,6 +135,7 @@ class CompositeIndexTests( unittest.TestCase ):
             st = time()
             res2 = self._compositeSearch(*args, **kw)
             print "composite: %s hits in %3.2fms" % (len(res2), (time() -st)*1000)
+            
 
             self.assertEqual(len(res1),len(res2))
             
@@ -150,16 +161,18 @@ class CompositeIndexTests( unittest.TestCase ):
         print "************************************"
 
 
-    def XXXXXXXXXXXXtestSearch(self):
+    def xxxx_testSearch(self):
 
         obj = TestObject('obj1','Document','pending')
-        self.cat.catalog_object(obj)
+        self._populateIndexes(1 , obj)
+        
         
         obj = TestObject('obj2','News','pending')
-        self.cat.catalog_object(obj)
+        self._populateIndexes(2 , obj)
+        
         
         obj = TestObject('obj3','News','visible')
-        self.cat.catalog_object(obj)       
+        self._populateIndexes(3 , obj)
         
         queries = [{ 'review_state': { 'query':'pending'} ,'portal_type' : { 'query': 'Document'} },
                    { 'review_state': { 'query' : ('pending','visible') } , 'portal_type' : { 'query': 'News' }},
@@ -169,8 +182,8 @@ class CompositeIndexTests( unittest.TestCase ):
 
         for query in queries:
         
-            res1 = self._defaultSearch(**query)
-            res2 = self._compositeSearch(**query)
+            res1 = self._defaultSearch(query)
+            res2 = self._compositeSearch(query)
 
             self.assertEqual(len(res1),len(res2))
 
