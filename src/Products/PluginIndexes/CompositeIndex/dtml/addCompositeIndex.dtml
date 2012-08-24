@@ -32,24 +32,6 @@ object.
 
   <tr>
     <td align="left" valign="top">
-    <div class="form-label">
-    Composite key<br/>
-    (names of attributes to concatenate)
-    </div>
-    </td>
-    <td align="left" valign="top">
-    <input type="text" name="extra.id:records:string" size="10" />
-    <select name="extra.type:records:string">
-       <option value="">FieldIndex</option>
-       <option value="">KeywordIndex</option>
-    </select>
-    <input type="text" name="extra.attributes:records:string" size="40" /><br/>
-    
-    </td>
-  </tr>
-
-  <tr>
-    <td align="left" valign="top">
     <div class="form-optional">
     Type
     </div>
