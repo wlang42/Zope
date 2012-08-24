@@ -11,14 +11,17 @@
 #
 ##############################################################################
 
-from itertools import chain, combinations
+from itertools import chain
+from itertools import combinations
+from itertools import product as cartesian_product
 
 _marker = []
 
-class PermuteKeywordList:
-    """
+class CartesianProduct:
+    """ Cartesian product of input iterables.
         returns a flat list of a sequential
         permutation of keyword lists.
+
         Example:
 
         A = [[1,2,3],[4,5],[6,7]]
@@ -95,7 +98,12 @@ class PermuteKeywordList:
 
 
 
+# since python 2.6 CartesianProduct class is obsolete
+# itertools library provides a native function
+def product(*args, **kwds):
+    return cartesian_product(*args, **kwds)
 
+# adapted from http://docs.python.org/library/itertools.html#recipes
 def powerset(iterable,start=0):
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(start,len(s)+1))
