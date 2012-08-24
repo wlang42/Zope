@@ -14,6 +14,11 @@
 import sys
 import logging
 
+
+from itertools import chain
+from itertools import combinations
+from itertools import product as cartesian_product
+
 from Acquisition import aq_parent
 from Persistence import PersistentMapping
 
@@ -26,7 +31,6 @@ from BTrees.OOBTree import OOBTree
 from BTrees.IOBTree import IOBTree
 from BTrees.Length import Length
 
-
 from zope.interface import implements
 
 from ZODB.POSException import ConflictError
@@ -37,7 +41,6 @@ from Products.PluginIndexes.common.UnIndex import UnIndex
 from Products.PluginIndexes.common.util import parseIndexRequest
 from Products.PluginIndexes.common import safe_callable
 
-from util import PermuteKeywordList, powerset
 
 QUERY_OPTIONS = { 'FieldIndex' :  ["query","range"] ,
                   'KeywordIndex' : ["query","operator","range"] }
@@ -49,32 +52,62 @@ logger = logging.getLogger('CompositeIndex')
 
 class Component:
 
-    def __init__(self,id,type,attributes):
+    _attributes = ''
+    def __init__(self,id,meta_type,attributes):
         
         self._id = id
-        self._type = type
+        self._meta_type = meta_type
         
-        if isinstance(attributes, str):
-            self._attributes = attributes.split(',')
-        else:
-            self._attributes = list(attributes)
-            
-        self._attributes = [ attr.strip() for attr in self._attributes if attr ]
-        
+        if attributes:
+            self._attributes = attributes
 
     @property
     def id(self):
         return self._id
 
     @property
-    def type(self):
-        return self._type
+    def meta_type(self):
+        return self._meta_type
 
     @property
     def attributes(self):
-        if not self._attributes:
+
+        attributes = self._attributes
+
+        if not attributes:
             return [self._id]
+        
+        if isinstance(attributes, str):
+            return attributes.split(',')
+
+        attributes = list(attributes)
+
+        attributes = [ attr.strip() for attr in attributes if attr ]
+        
+        return attributes
+
+    @property
+    def rawAttributes(self):
         return self._attributes
+
+    def __repr__(self):
+        return "<id: %s; metatype: %s; attributes: %s>" % (self.id,self.meta_type,self.attributes)
+
+# adapted from http://docs.python.org/library/itertools.html#recipes
+def powerset(iterable,start=0):
+    s = list(iterable)
+    return chain.from_iterable(combinations(s, r) for r in range(start,len(s)+1))
+
+# platform (32/64bit) independent hash function
+def hash32(x):
+    x = hash(x)
+    # Convert x into a 32-bit signed integer.
+    # borrowed from Ronald L. Rivest http://courses.csail.mit.edu/6.006/fall07/source/alg_hash.py
+    x = x % (2**32)
+    if x >= 2**31: 
+        x = x - 2**32
+    x = int(x)
+    return x   
 
 
 
@@ -155,14 +188,15 @@ class CompositeIndex(UnIndex):
 
         # set components
         self._components = PersistentMapping()
-        for cdata in extra:
-            c_id = cdata['id']
-            c_type = cdata['type']
-            c_attributes = cdata['attributes']  
-            self._components[c_id] = Component(c_id,c_type,c_attributes)
+        if extra:
+            for cdata in extra:
+                c_id = cdata['id']
+                c_meta_type = cdata['meta_type']
+                c_attributes = cdata['attributes']  
+                self._components[c_id] = Component(c_id,c_meta_type,c_attributes)
 
-        if not self._components:
-            self._components[id] = Component(id,'KeywordIndex',None)
+        #if not self._components:
+        #    self._components[id] = Component(id,'KeywordIndex',None)
         
         self._length = Length()
         self.clear()
@@ -192,17 +226,17 @@ class CompositeIndex(UnIndex):
         if len(record.keys) > 0 and not isinstance(record.keys[0][1],parseIndexRequest):
             if isinstance(record.keys[0],tuple):
                 for i,k in enumerate(record.keys):
-                    record.keys[i] = hash(k)
+                    record.keys[i] = hash32(k)
                     
             return super(CompositeIndex,self)._apply_index(request, resultset=resultset)
          
         operator = self.useOperator
-
     
         tmp = []
         for c, rec in record.keys:
             res, dummy = self._apply_component_index(rec,c)
             tmp.append(res)
+
 
         if len(tmp) > 2:
             setlist = sorted(tmp, key=len)
@@ -237,14 +271,17 @@ class CompositeIndex(UnIndex):
 
     def _apply_component_index(self, record, cid,resultset = None):
         """ Apply the component index to query parameters given in the record arg. """
+
         
         if record.keys==None: return None
 
         index = self._cindexes[cid]
+
         r     = None
         opr   = None
 
         operator = record.get('operator',self.useOperator)
+    
         if not operator in self.operators :
             raise RuntimeError,"operator not valid: %s" % escape(operator)
         
@@ -283,7 +320,7 @@ class CompositeIndex(UnIndex):
             r = multiunion(tmp)
                 
         else: # not a range search
-
+            
             tmp = []
             if operator == 'or':
                 for key in record.keys:
@@ -301,6 +338,7 @@ class CompositeIndex(UnIndex):
                 if len(record.keys) > 1:
                     key = tuple(sorted(record.keys))
                 else:
+
                     key = record.keys[0]
                 s=index.get(key, None)
                 if s is None:
@@ -344,13 +382,14 @@ class CompositeIndex(UnIndex):
         newUKeywords = self._get_permuted_keywords(obj)
         
         # hashed keywords
-        newKeywords = map(lambda x: hash(x),newUKeywords)
-        
+        newKeywords = map(lambda x: hash32(x),newUKeywords)
+
+
         for i, kw in enumerate(newKeywords):
             if not self._tindex.get(kw,None):
                 self._tindex[kw]=newUKeywords[i]
             
-        newKeywords = map(lambda x: hash(x),newUKeywords)
+        newKeywords = map(lambda x: hash32(x),newUKeywords)
 
         oldKeywords = self._unindex.get(documentId, None)
 
@@ -497,21 +536,21 @@ class CompositeIndex(UnIndex):
         """ returns permutation list of object keywords """    
 
         components = self.getIndexComponents()
-         
+        
         kw_list = []
         
         for c in components:
             kw=self._get_keywords(obj, c)
             kw_list.append(kw)
-        
-        pkl = PermuteKeywordList(kw_list)
 
-        return pkl.keys
+        pkl = cartesian_product(*kw_list)
+
+        return tuple(pkl)
 
 
     def _get_keywords(self,obj,component):
 
-        if component.type == 'FieldIndex':
+        if component.meta_type == 'FieldIndex':
             attr = component.attributes[-1]
             try:
                 datum = getattr(obj, attr)
@@ -523,7 +562,7 @@ class CompositeIndex(UnIndex):
                 datum = tuple(datum)
             return (datum,)
 
-        elif component.type == 'KeywordIndex':
+        elif component.meta_type == 'KeywordIndex':
             for attr in component.attributes:
                 datum = []
                 newKeywords = getattr(obj, attr, ())
@@ -652,7 +691,7 @@ class CompositeIndex(UnIndex):
         records=[]
  
         for c in components:
-            query_options = QUERY_OPTIONS[c.type]
+            query_options = QUERY_OPTIONS[c.meta_type]
             rec = parseIndexRequest(query, c.id, query_options)
 
             if rec.keys is None:
@@ -674,6 +713,73 @@ class CompositeIndex(UnIndex):
         
         return cquery
 
+    def addComponent(self, c_id, c_meta_type, c_attributes):
+        # Add a component object by 'c_id'.
+        if self._components.has_key(c_id):
+            raise KeyError,\
+                'A component with this name already exists: %s' % c_id
+       
+
+        self._components[c_id] = Component(c_id,
+                                           c_meta_type,
+                                           c_attributes,
+                                           )
+        self.clear()
+
+    def delComponent(self, c_id):
+        # Delete the component object specified by 'c_id'.
+        if not self._components.has_key(c_id):
+            raise KeyError,\
+                'no such Component:  %s' % c_id
+        del self._components[c_id]
+
+        self.clear()
+    
+    def saveComponents(self, components):
+        # Change the component object specified by 'c_id'.
+        for c in components:
+            self.delComponent(c.old_id)
+            self.addComponent(c.id, c.meta_type, c.attributes)
+    
+
+    def manage_addComponent(self, c_id, c_meta_type, c_attributes, URL1, \
+                                  REQUEST=None,RESPONSE=None):
+        """ add a new component """
+        
+        if len(c_id) == 0: raise RuntimeError,'Length of component ID too short'
+        if len(c_meta_type) == 0: raise RuntimeError,'No component type set'
+        
+        self.addComponent(c_id, c_meta_type, c_attributes)
+        
+        if RESPONSE:
+            RESPONSE.redirect(URL1+'/manage_main?'
+                              'manage_tabs_message=Component%20added')
+
+    def manage_delComponents(self,del_ids, URL1=None,\
+                                 REQUEST=None,RESPONSE=None):
+        """ delete one or more components """
+        if not del_ids: raise RuntimeError,'No component selected'
+
+        for c_id in del_ids:
+            self.delComponent(c_id)
+
+        if RESPONSE:
+            RESPONSE.redirect(URL1+'/manage_main?'
+            'manage_tabs_message=Component(s)%20deleted')
+
+
+    def manage_saveComponents(self,components, URL1=None,\
+            REQUEST=None,RESPONSE=None):
+        """ save values for a component """
+        
+        self.saveComponents(components)
+
+        if RESPONSE:
+            RESPONSE.redirect(URL1+'/manage_main?'
+            'manage_tabs_message=Component(s)%20updated')
+
+
+
     manage = manage_main = DTMLFile('dtml/manageCompositeIndex', globals())
     manage_main._setName('manage_main')
     manage_browse = DTMLFile('dtml/browseIndex', globals())
@@ -686,9 +792,4 @@ def manage_addCompositeIndex(self, id, extra=None,
     """Add a composite index"""
     return self.manage_addIndex(id, 'CompositeIndex', extra=extra, \
              REQUEST=REQUEST, RESPONSE=RESPONSE, URL1=URL3)
-
-
-    
-
-        
 
