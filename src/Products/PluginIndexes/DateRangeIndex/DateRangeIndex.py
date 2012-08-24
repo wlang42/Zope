@@ -14,6 +14,8 @@
 """
 
 import os
+import math
+from copy import copy
 from datetime import datetime
 
 from AccessControl.class_init import InitializeClass
@@ -240,7 +242,7 @@ class DateRangeIndex(UnIndex):
 
         return tuple( result )
 
-    def _apply_index(self, request, resultset=None):
+    def _apply_index(self, request, resultset=None, sequential=True):
         """
             Apply the index to query parameters given in 'request', which
             should be a mapping object.
@@ -258,6 +260,28 @@ class DateRangeIndex(UnIndex):
             return None
 
         term        = self._convertDateTime( record.keys[0] )
+
+        # If we already get a small result set passed in, sequential search
+        # is faster than collecting the various indexes with multiunion.
+        threshold = 0.22
+        if len(self._unindex) >= 50000:
+            # empirically determined threshold function
+            threshold = 0.98 - 6.7*math.log(len(self._unindex))/100.
+
+        #print len(self._unindex), threshold
+        #if sequential  and resultset and len(resultset) <= threshold:
+        if sequential  and resultset:
+            
+            def check_range(docId):
+                intervall = self.getEntryForObject(docId)
+                if (term >= intervall[0] or intervall[0] is None) and \
+                        (term <= intervall[1] or intervall[1] is None) :
+                    return True
+                return False
+
+            result = IISet(filter(check_range, resultset.keys()))
+
+            return result, ( self._since_field, self._until_field ) 
 
         #
         #   Aggregate sets for each bucket separately, to avoid
