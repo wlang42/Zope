@@ -1636,7 +1636,7 @@ class ZopeFieldStorage(FieldStorage):
 
     def read_binary(self):
         self._binary_file = True
-        return super(ZopeFieldStorage, self).read_binary()
+        return FieldStorage.read_binary(self)
 
 
 # Original version: zope.publisher.browser.FileUpload
