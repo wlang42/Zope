@@ -24,7 +24,6 @@ import time
 
 from AccessControl.tainted import should_be_tainted
 from AccessControl.tainted import taint_string
-import pkg_resources
 from six import binary_type
 from six import PY2
 from six import PY3
@@ -43,6 +42,7 @@ from ZPublisher.BaseRequest import BaseRequest
 from ZPublisher.BaseRequest import quote
 from ZPublisher.Converters import get_converter
 from ZPublisher.utils import basic_auth_decode
+from ZPublisher import xmlrpc
 
 if PY3:
     from html import escape
@@ -52,14 +52,6 @@ else:
     from cgi import escape
     from urllib import splitport
     from urllib import splittype
-
-xmlrpc = None
-try:
-    dist = pkg_resources.get_distribution('ZServer')
-except pkg_resources.DistributionNotFound:
-    pass
-else:
-    from ZServer.ZPublisher import xmlrpc
 
 # Flags
 SEQUENCE = 1
@@ -505,7 +497,26 @@ class HTTPRequest(BaseRequest):
             environ['QUERY_STRING'] = ''
 
         meth = None
-        fs = FieldStorage(fp=fp, environ=environ, keep_blank_values=1)
+
+        # Workaround for https://bugs.python.org/issue27777:
+        # If Content-Length is nonzero, manufacture a Content-Disposition
+        # with a filename to make sure a binary file is opened.
+        headers = None
+        if 'CONTENT_LENGTH' in environ and environ['CONTENT_LENGTH'] != '0':
+            # In order to override content-disposition we need to
+            # specify the full headers; this is based on FileStorage.__init__
+            headers = {}
+            if method == 'POST':
+                # Set default content-type for POST to what's traditional
+                headers['content-type'] = "application/x-www-form-urlencoded"
+            if 'CONTENT_TYPE' in environ:
+                headers['content-type'] = environ['CONTENT_TYPE']
+            if 'QUERY_STRING' in environ:
+                self.qs_on_post = environ['QUERY_STRING']
+            headers['content-length'] = environ['CONTENT_LENGTH']
+            headers['content-disposition'] = 'inline; filename="stdin"'
+        fs = FieldStorage(
+            fp=fp, headers=headers, environ=environ, keep_blank_values=1)
 
         # Keep a reference to the FieldStorage. Otherwise it's
         # __del__ method is called too early and closing FieldStorage.file.
@@ -515,7 +526,7 @@ class HTTPRequest(BaseRequest):
             if 'HTTP_SOAPACTION' in environ:
                 # Stash XML request for interpretation by a SOAP-aware view
                 other['SOAPXML'] = fs.value
-            elif (xmlrpc is not None and method == 'POST' and
+            elif (method == 'POST' and
                   ('content-type' in fs.headers and
                    'text/xml' in fs.headers['content-type'])):
                 # Ye haaa, XML-RPC!
