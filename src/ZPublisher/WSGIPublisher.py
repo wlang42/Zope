@@ -144,10 +144,8 @@ def transaction_pubevents(request, response, tm=transaction.manager):
         exc_info = (exc_type, exc, sys.exc_info()[2])
 
         try:
-            # Raise exception from app if handle-errors is False
-            # (set by zope.testbrowser in some cases)
-            if request.environ.get('x-wsgiorg.throw_errors', False):
-                reraise(*exc_info)
+            # Raise exception from app
+            reraise(*exc_info)
 
             if isinstance(exc, Unauthorized):
                 # _unauthorized modifies the response in-place. If this hook
