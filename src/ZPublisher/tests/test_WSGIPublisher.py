@@ -302,6 +302,7 @@ class TestPublishModule(ZopeTestCase):
         from ZPublisher.HTTPResponse import WSGIResponse
         environ = self._makeEnviron()
         start_response = DummyCallable()
+
         def _publish(request, mod_info):
             response = WSGIResponse()
             response.write(b'WRITTEN')
@@ -450,10 +451,8 @@ class TestPublishModule(ZopeTestCase):
         start_response = DummyCallable()
         _publish = DummyCallable()
         _publish._raise = Unauthorized('argg')
-        app_iter = self._callFUT(environ, start_response, _publish)
-        body = b''.join(app_iter)
-        self.assertEqual(start_response._called_with[0][0], '401 Unauthorized')
-        self.assertTrue(b'Exception View: Unauthorized' in body)
+        with self.assertRaises(Unauthorized):
+            self._callFUT(environ, start_response, _publish)
 
     def testCustomExceptionViewForbidden(self):
         from zExceptions import Forbidden
@@ -462,10 +461,8 @@ class TestPublishModule(ZopeTestCase):
         start_response = DummyCallable()
         _publish = DummyCallable()
         _publish._raise = Forbidden('argh')
-        app_iter = self._callFUT(environ, start_response, _publish)
-        body = b''.join(app_iter)
-        self.assertEqual(start_response._called_with[0][0], '403 Forbidden')
-        self.assertTrue(b'Exception View: Forbidden' in body)
+        with self.assertRaises(Forbidden):
+            self._callFUT(environ, start_response, _publish)
 
     def testCustomExceptionViewNotFound(self):
         from zExceptions import NotFound
@@ -474,22 +471,21 @@ class TestPublishModule(ZopeTestCase):
         start_response = DummyCallable()
         _publish = DummyCallable()
         _publish._raise = NotFound('argh')
-        app_iter = self._callFUT(environ, start_response, _publish)
-        body = b''.join(app_iter)
-        self.assertEqual(start_response._called_with[0][0], '404 Not Found')
-        self.assertTrue(b'Exception View: NotFound' in body)
+        with self.assertRaises(NotFound):
+            self._callFUT(environ, start_response, _publish)
 
     def testCustomExceptionViewZTKNotFound(self):
+        from zExceptions import NotFound
         from zope.publisher.interfaces import NotFound as ZTK_NotFound
         registerExceptionView(INotFound)
         environ = self._makeEnviron()
         start_response = DummyCallable()
         _publish = DummyCallable()
         _publish._raise = ZTK_NotFound(object(), 'argh')
-        app_iter = self._callFUT(environ, start_response, _publish)
-        body = b''.join(app_iter)
-        self.assertEqual(start_response._called_with[0][0], '404 Not Found')
-        self.assertTrue(b'Exception View: NotFound' in body)
+        with self.assertRaises(NotFound):
+            # ZTK_NotFound will be upgraded to zExceptions.NotFound,
+            # see comment in WSGIPublisher.transaction_pubevents
+            self._callFUT(environ, start_response, _publish)
 
     def testCustomExceptionViewBadRequest(self):
         from zExceptions import BadRequest
@@ -498,10 +494,8 @@ class TestPublishModule(ZopeTestCase):
         start_response = DummyCallable()
         _publish = DummyCallable()
         _publish._raise = BadRequest('argh')
-        app_iter = self._callFUT(environ, start_response, _publish)
-        body = b''.join(app_iter)
-        self.assertEqual(start_response._called_with[0][0], '400 Bad Request')
-        self.assertTrue(b'Exception View: BadRequest' in body)
+        with self.assertRaises(BadRequest):
+            self._callFUT(environ, start_response, _publish)
 
     def testCustomExceptionViewInternalError(self):
         from zExceptions import InternalError
@@ -510,11 +504,8 @@ class TestPublishModule(ZopeTestCase):
         start_response = DummyCallable()
         _publish = DummyCallable()
         _publish._raise = InternalError('argh')
-        app_iter = self._callFUT(environ, start_response, _publish)
-        body = b''.join(app_iter)
-        self.assertEqual(
-            start_response._called_with[0][0], '500 Internal Server Error')
-        self.assertTrue(b'Exception View: InternalError' in body)
+        with self.assertRaises(InternalError):
+            self._callFUT(environ, start_response, _publish)
 
     def testRedirectExceptionView(self):
         from zExceptions import Redirect
@@ -523,13 +514,10 @@ class TestPublishModule(ZopeTestCase):
         start_response = DummyCallable()
         _publish = DummyCallable()
         _publish._raise = Redirect('http://localhost:9/')
-        app_iter = self._callFUT(environ, start_response, _publish)
-        body = b''.join(app_iter)
-        status, headers = start_response._called_with[0]
-        self.assertEqual(status, '302 Found')
-        self.assertTrue(b'Exception View: Redirect' in body)
-        headers = dict(headers)
-        self.assertEqual(headers['Location'], 'http://localhost:9/')
+        with self.assertRaises(Redirect) as redir:
+            self._callFUT(environ, start_response, _publish)
+            self.assertEqual(
+                redir.exception.headers['Location'], 'http://localhost:9/')
 
     def testHandleErrorsFalseBypassesExceptionResponse(self):
         from AccessControl import Unauthorized
