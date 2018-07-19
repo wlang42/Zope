@@ -144,9 +144,6 @@ def transaction_pubevents(request, response, tm=transaction.manager):
         exc_info = (exc_type, exc, sys.exc_info()[2])
 
         try:
-            # Raise exception from app
-            reraise(*exc_info)
-
             if isinstance(exc, Unauthorized):
                 # _unauthorized modifies the response in-place. If this hook
                 # is used, an exception view for Unauthorized has to merge
@@ -155,18 +152,13 @@ def transaction_pubevents(request, response, tm=transaction.manager):
                 response._unauthorized()
                 response.setStatus(exc.getStatus())
 
-            # Handle exception view
-            exc_view_created = _exc_view_created_response(
-                exc, request, response)
-
             notify(pubevents.PubBeforeAbort(
                 request, exc_info, request.supports_retry()))
             tm.abort()
             notify(pubevents.PubFailure(
                 request, exc_info, request.supports_retry()))
 
-            if not (exc_view_created or isinstance(exc, Unauthorized)):
-                reraise(*exc_info)
+            reraise(*exc_info)
         finally:
             # Avoid traceback / exception reference cycle.
             del exc, exc_info
